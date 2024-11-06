@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:stroke_order_animator/src/brush.dart';
 import 'package:stroke_order_animator/src/character_painter.dart';
@@ -11,6 +12,40 @@ import 'package:stroke_order_animator/src/stroke_order_animation_controller.dart
 /// recommended to use a unique key for every [StrokeOrderAnimator] and cancel
 /// the animation when the selected page changes in order to avoid broken
 /// animation behavior.
+
+// Custom Gesture Recognizer
+class CustomPanGestureRecognizer extends OneSequenceGestureRecognizer {
+  CustomPanGestureRecognizer({super.debugOwner});
+
+  Function(Offset)? onPanStart;
+  Function(Offset)? onPanUpdate;
+  Function()? onPanEnd;
+
+  @override
+  void addPointer(PointerEvent event) {
+    startTrackingPointer(event.pointer);
+    resolve(GestureDisposition.accepted);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerMoveEvent) {
+      onPanUpdate?.call(event.localPosition);
+    } else if (event is PointerDownEvent) {
+      onPanStart?.call(event.localPosition);
+    } else if (event is PointerUpEvent) {
+      onPanEnd?.call();
+      stopTrackingPointer(event.pointer);
+    }
+  }
+
+  @override
+  String get debugDescription => 'customPan';
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {}
+}
+
 class StrokeOrderAnimator extends StatefulWidget {
   const StrokeOrderAnimator(
     this._controller, {
@@ -35,35 +70,44 @@ class StrokeOrderAnimatorState extends State<StrokeOrderAnimator> {
 
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, child) => GestureDetector(
-        onPanUpdate: (DragUpdateDetails details) {
-          // User continues stroke
-          if (_userStrokeLeftCanvas) {
-            return;
-          }
+      builder: (context, child) => RawGestureDetector(
+        gestures: {
+          CustomPanGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<CustomPanGestureRecognizer>(
+            () => CustomPanGestureRecognizer(),
+            (CustomPanGestureRecognizer instance) {
+              instance.onPanUpdate = (details) {
+                // User continues stroke
+                if (_userStrokeLeftCanvas) {
+                  return;
+                }
 
-          final RenderBox box = context.findRenderObject()! as RenderBox;
-          final Offset point = box.globalToLocal(details.globalPosition);
+                final RenderBox box = context.findRenderObject()! as RenderBox;
+                final Offset point = box.globalToLocal(details);
 
-          setState(() {
-            if (_pointIsOnCanvas(point, box)) {
-              _currentUserStroke.add(
-                // Normalize point to 1024x1024 coordinate system
-                Offset(point.dx / box.size.width, point.dy / box.size.height) *
-                    1024,
-              );
-            } else {
-              _userStrokeLeftCanvas = true;
-            }
-          });
-        },
-        onPanEnd: (DragEndDetails details) {
-          // User finished stroke
-          controller.checkStroke(_currentUserStroke);
-          setState(() {
-            _currentUserStroke.clear();
-            _userStrokeLeftCanvas = false;
-          });
+                setState(() {
+                  if (_pointIsOnCanvas(point, box)) {
+                    _currentUserStroke.add(
+                      // Normalize point to 1024x1024 coordinate system
+                      Offset(point.dx / box.size.width,
+                              point.dy / box.size.height) *
+                          1024,
+                    );
+                  } else {
+                    _userStrokeLeftCanvas = true;
+                  }
+                });
+              };
+              instance.onPanEnd = () {
+                // User finished stroke
+                controller.checkStroke(_currentUserStroke);
+                setState(() {
+                  _currentUserStroke.clear();
+                  _userStrokeLeftCanvas = false;
+                });
+              };
+            },
+          ),
         },
         child: SizedBox(
           width: widget.size.width,
